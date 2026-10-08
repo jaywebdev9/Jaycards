@@ -1,0 +1,195 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  BUSINESS_USER
+  PLATFORM_ADMIN
+}
+
+enum BusinessStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum MessageStatus {
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  FAILED
+  REJECTED
+  UNKNOWN
+}
+
+enum WalletTxType {
+  CREDIT_PURCHASE
+  SMS_USAGE
+  ADMIN_ADJUSTMENT
+  REFUND
+}
+
+model User {
+  id           String   @id @default(uuid())
+  businessId   String?
+  business     Business? @relation(fields: [businessId], references: [id])
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole @default(BUSINESS_USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  auditLogs    AuditLog[]
+
+  @@index([businessId])
+}
+
+model Business {
+  id                  String         @id @default(uuid())
+  name                String
+  ownerName           String
+  email               String         @unique
+  phone               String
+  status              BusinessStatus @default(ACTIVE)
+  currency            String         @default("TZS")
+  smsPriceOverride    Int?
+  lowCreditThreshold  Int?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  users               User[]
+  wallet              Wallet?
+  transactions        WalletTransaction[]
+  payments            Payment[]
+  messages            Message[]
+  providerLogs        SmsProviderLog[]
+
+  @@index([email])
+  @@index([status])
+}
+
+model Wallet {
+  id         String   @id @default(uuid())
+  businessId String   @unique
+  business   Business @relation(fields: [businessId], references: [id])
+  balance    Int      @default(0)
+  updatedAt  DateTime @updatedAt
+}
+
+model WalletTransaction {
+  id            String       @id @default(uuid())
+  businessId    String
+  business      Business     @relation(fields: [businessId], references: [id])
+  type          WalletTxType
+  amount        Int
+  balanceBefore Int
+  balanceAfter  Int
+  reference     String?
+  description   String
+  actorId       String?
+  createdAt     DateTime     @default(now())
+
+  @@index([businessId, createdAt])
+  @@index([reference])
+}
+
+model Payment {
+  id                    String        @id @default(uuid())
+  businessId            String
+  business              Business      @relation(fields: [businessId], references: [id])
+  provider              String
+  providerTransactionId String?       @unique
+  orderId               String        @unique
+  amount                Int
+  currency              String
+  credits               Int
+  unitPrice             Int
+  status                PaymentStatus @default(PENDING)
+  paymentMethod         String?
+  rawResponse           Json?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  @@index([businessId, createdAt])
+  @@index([providerTransactionId])
+  @@index([status])
+}
+
+model Message {
+  id                  String        @id @default(uuid())
+  businessId          String
+  business            Business      @relation(fields: [businessId], references: [id])
+  recipient           String
+  messageBody         String
+  senderId            String
+  status              MessageStatus @default(QUEUED)
+  providerMessageId   String?
+  creditsUsed         Int
+  segments            Int
+  errorCode           String?
+  errorMessage        String?
+  sentAt              DateTime?
+  deliveredAt         DateTime?
+  rawProviderResponse Json?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  logs                SmsProviderLog[]
+
+  @@index([businessId, createdAt])
+  @@index([providerMessageId])
+  @@index([status])
+  @@index([recipient])
+}
+
+model SmsProviderLog {
+  id         String   @id @default(uuid())
+  businessId String?
+  business   Business? @relation(fields: [businessId], references: [id])
+  messageId  String?
+  message    Message? @relation(fields: [messageId], references: [id])
+  direction  String
+  event      String
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  @@index([messageId])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  targetType String
+  targetId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+}
+
+model PricingConfig {
+  id                   String   @id @default("default")
+  currency             String   @default("TZS")
+  customerSmsPrice     Int      @default(25)
+  providerSmsCost      Int      @default(18)
+  minimumPurchase      Int      @default(1000)
+  lowCreditThreshold   Int      @default(500)
+  packages             Json
+  updatedAt            DateTime @updatedAt
+}
